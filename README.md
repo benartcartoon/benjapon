@@ -1,55 +1,30 @@
-# BenJapon
+# BenJapon — tek komut Japonca dublaj
 
-Türkçe ↔ Japonca çeviri için Python tabanlı sistem. Google Colab üzerinde GPU varsa otomatik CUDA kullanır; yoksa CPU ile çalışır.
+Amaç: Türkçe konuşulan bir videoyu al, konuşmayı yazıya dök, Japoncaya çevir, aynı konuşmacının sesini Qwen3-TTS ile klonla ve videoyu yeni Japonca sese göre dudak senkronla.
 
-## Özellikler
+## Tek komut
 
-- Türkçeden Japoncaya çeviri (`tr-ja`)
-- Japoncadan Türkçeye çeviri (`ja-tr`)
-- Hugging Face Transformers tabanlı model çalıştırma
-- CUDA/CPU otomatik seçimi
-- Python fonksiyonu, komut satırı ve FastAPI arayüzü
-- Google Colab'a hazır kurulum
-
-## Colab kurulumu
-
-```python
-!git clone https://github.com/benartcartoon/benjapon.git
-%cd benjapon
-!pip install -r requirements.txt
-```
-
-```python
-from translator import translate
-print(translate("Gözler kalbin aynasıdır.", "tr-ja").text)
-```
-
-## Terminal
+GPU sunucusunda:
 
 ```bash
-python translator.py "Merhaba, nasılsın?" --direction tr-ja
+git clone https://github.com/benartcartoon/benjapon.git && cd benjapon && bash oneclick.sh /path/video.mp4
 ```
 
-## API
+İlk çalıştırmada ortam ve model dosyaları indirilir. Sonraki videolarda aynı önbellek kullanılır.
 
-```bash
-uvicorn app:app --host 0.0.0.0 --port 8000
-```
+Çıktı: `outputs/<video_adi>_JA.mp4`
 
-`POST /translate` gövdesi:
+## Kalite seçimi
+- 18 GB ve üzeri VRAM: LatentSync 1.6, 512px, 30 inference step.
+- 8–17 GB VRAM: MuseTalk 1.5.
+- 8 GB altı: bilinçli olarak durur; düşük kaliteli minimum kurulum yapılmaz.
 
-```json
-{
-  "text": "Merhaba, nasılsın?",
-  "direction": "tr-ja"
-}
-```
+## Ana bileşenler
+- ASR: faster-whisper large-v3
+- Çeviri: NLLB-200 distilled 1.3B (Türkçe -> Japonca)
+- Ses klonlama: Qwen/Qwen3-TTS-12Hz-1.7B-Base
+- Lip-sync: ByteDance LatentSync 1.6 veya MuseTalk 1.5
+- Video/audio: FFmpeg
 
-## Dosyalar
-
-- `translator.py`: çeviri motoru
-- `app.py`: HTTP API
-- `colab_setup.py`: Colab/GPU ortam kontrolü
-- `requirements.txt`: bağımlılıklar
-
-Not: İlk çalıştırmada seçilen model indirilir; bu yüzden ilk başlangıç sonraki çalıştırmalardan daha uzun sürebilir.
+## Not
+En iyi ses klonu için videoda tek konuşmacı, temiz ses ve en az birkaç saniyelik net konuşma bulunması gerekir.

@@ -9,7 +9,7 @@ fi
 
 if [[ ! -x "$DIR/.venv/bin/python" ]]; then
   uv python install 3.10
-  uv venv --python 3.10 "$DIR/.venv"
+  uv venv --seed --python 3.10 "$DIR/.venv"
   P="$DIR/.venv/bin/python"
   "$P" -m pip install -U pip wheel setuptools
   "$P" -m pip install torch==2.0.1 torchvision==0.15.2 torchaudio==2.0.2 --index-url https://download.pytorch.org/whl/cu118

@@ -31,19 +31,17 @@ fi
 
 if [[ ! -x .venv/bin/python ]]; then
   uv python install 3.12
-  uv venv --python 3.12 .venv
+  uv venv --seed --python 3.12 .venv
 fi
 source .venv/bin/activate
 python -m pip install -U pip wheel setuptools
 python -m pip install -r requirements.txt
 
 mkdir -p engines outputs cache work
-
 ENGINE="musetalk"
 if (( VRAM >= 18000 )); then ENGINE="latentsync"; fi
 
 echo "GPU VRAM: ${VRAM} MB | Secilen lip-sync: ${ENGINE}"
-
 if [[ "$ENGINE" == "latentsync" ]]; then
   bash scripts/setup_latentsync.sh
 else

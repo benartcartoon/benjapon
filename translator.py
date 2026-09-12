@@ -9,9 +9,10 @@ from transformers import AutoModelForSeq2SeqLM, AutoTokenizer
 
 Direction = Literal["tr-ja", "ja-tr"]
 
-MODELS = {
-    "tr-ja": "Helsinki-NLP/opus-mt-tr-jap",
-    "ja-tr": "Helsinki-NLP/opus-mt-jap-trk",
+MODEL_NAME = "facebook/nllb-200-distilled-600M"
+LANGS = {
+    "tr-ja": ("tur_Latn", "jpn_Jpan"),
+    "ja-tr": ("jpn_Jpan", "tur_Latn"),
 }
 
 
@@ -28,10 +29,9 @@ def _device() -> str:
 
 
 @lru_cache(maxsize=2)
-def _load(direction: Direction):
-    model_name = MODELS[direction]
-    tokenizer = AutoTokenizer.from_pretrained(model_name)
-    model = AutoModelForSeq2SeqLM.from_pretrained(model_name)
+def _load(src_lang: str):
+    tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME, src_lang=src_lang)
+    model = AutoModelForSeq2SeqLM.from_pretrained(MODEL_NAME)
     device = _device()
     model.to(device)
     model.eval()
@@ -42,22 +42,34 @@ def translate(text: str, direction: Direction = "tr-ja", max_new_tokens: int = 2
     text = text.strip()
     if not text:
         raise ValueError("Metin boş olamaz.")
-    if direction not in MODELS:
+    if direction not in LANGS:
         raise ValueError("direction 'tr-ja' veya 'ja-tr' olmalıdır.")
 
-    tokenizer, model, device = _load(direction)
+    src_lang, tgt_lang = LANGS[direction]
+    tokenizer, model, device = _load(src_lang)
+    tokenizer.src_lang = src_lang
+
     batch = tokenizer(text, return_tensors="pt", truncation=True, max_length=512)
     batch = {k: v.to(device) for k, v in batch.items()}
+
+    forced_bos_token_id = tokenizer.convert_tokens_to_ids(tgt_lang)
     with torch.inference_mode():
-        output = model.generate(**batch, max_new_tokens=max_new_tokens, num_beams=4)
+        output = model.generate(
+            **batch,
+            forced_bos_token_id=forced_bos_token_id,
+            max_new_tokens=max_new_tokens,
+            num_beams=4,
+        )
+
     translated = tokenizer.decode(output[0], skip_special_tokens=True).strip()
-    return TranslationResult(translated, direction, MODELS[direction], device)
+    return TranslationResult(translated, direction, MODEL_NAME, device)
 
 
 if __name__ == "__main__":
     import argparse
+
     parser = argparse.ArgumentParser(description="Türkçe ↔ Japonca çeviri")
     parser.add_argument("text")
-    parser.add_argument("--direction", choices=list(MODELS), default="tr-ja")
+    parser.add_argument("--direction", choices=list(LANGS), default="tr-ja")
     args = parser.parse_args()
     print(translate(args.text, args.direction).text)

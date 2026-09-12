@@ -9,7 +9,7 @@ fi
 
 if [[ ! -x "$DIR/.venv/bin/python" ]]; then
   uv python install 3.10
-  uv venv --python 3.10 "$DIR/.venv"
+  uv venv --seed --python 3.10 "$DIR/.venv"
   "$DIR/.venv/bin/python" -m pip install -U pip wheel setuptools
   "$DIR/.venv/bin/python" -m pip install -r "$DIR/requirements.txt"
 fi

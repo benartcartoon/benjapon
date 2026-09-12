@@ -2,16 +2,19 @@
 set -euo pipefail
 
 apt-get update -qq
-apt-get install -y -qq ffmpeg python3-venv
+apt-get install -y -qq ffmpeg
 
-# Keep the Colab/main environment untouched: NLLB/Whisper run there.
-# XTTS gets its own environment so its Transformers dependency cannot
-# break the translation stack.
+# Keep Colab's main environment untouched. Create an isolated XTTS env
+# without ensurepip, which can fail in Colab's Python 3.13 image.
 VENV="/content/xtts_env"
-python -m venv --system-site-packages "$VENV"
-"$VENV/bin/python" -m pip install -U pip setuptools wheel
-"$VENV/bin/python" -m pip uninstall -y TTS >/dev/null 2>&1 || true
-"$VENV/bin/python" -m pip install -U 'coqui-tts[ja]==0.27.5'
+rm -rf "$VENV"
+python -m venv --without-pip "$VENV"
+
+# Bootstrap pip into the venv using Colab's working pip module.
+python -m pip --python "$VENV/bin/python" install -U pip setuptools wheel
+
+# XTTS dependencies live only in this environment.
+python -m pip --python "$VENV/bin/python" install 'coqui-tts[ja]==0.27.5'
 
 export COQUI_TOS_AGREED=1
 

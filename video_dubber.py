@@ -1,22 +1,20 @@
 from __future__ import annotations
 
-import asyncio
 import subprocess
 from pathlib import Path
 
-import edge_tts
 import torch
 import whisper
 
 from translator import translate
 
 
-def run(cmd: list[str]) -> None:
-    subprocess.run(cmd, check=True)
+def run(cmd: list[str], cwd: str | None = None) -> None:
+    subprocess.run(cmd, check=True, cwd=cwd)
 
 
 def extract_audio(video: str, audio: str) -> None:
-    run(["ffmpeg", "-y", "-i", video, "-vn", "-ac", "1", "-ar", "16000", audio])
+    run(["ffmpeg", "-y", "-i", video, "-vn", "-ac", "1", "-ar", "24000", audio])
 
 
 def transcribe_turkish(audio: str, model_size: str = "small") -> str:
@@ -26,20 +24,21 @@ def transcribe_turkish(audio: str, model_size: str = "small") -> str:
     return result["text"].strip()
 
 
-async def _tts(text: str, output: str, voice: str) -> None:
-    await edge_tts.Communicate(text=text, voice=voice).save(output)
+def clone_voice_japanese(text: str, reference_audio: str, output: str) -> None:
+    """Generate Japanese speech using the speaker identity from reference_audio via XTTS-v2."""
+    try:
+        from TTS.api import TTS
+    except ImportError as exc:
+        raise RuntimeError("Coqui TTS kurulu değil. Önce setup_voice_clone_colab.sh çalıştırılmalı.") from exc
 
-
-def japanese_voice(text: str, output: str, voice: str = "ja-JP-NanamiNeural") -> None:
-    asyncio.run(_tts(text, output, voice))
-
-
-def replace_audio(video: str, audio: str, output: str) -> None:
-    run([
-        "ffmpeg", "-y", "-i", video, "-i", audio,
-        "-map", "0:v:0", "-map", "1:a:0", "-c:v", "copy",
-        "-c:a", "aac", "-shortest", output,
-    ])
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    tts = TTS("tts_models/multilingual/multi-dataset/xtts_v2").to(device)
+    tts.tts_to_file(
+        text=text,
+        speaker_wav=reference_audio,
+        language="ja",
+        file_path=output,
+    )
 
 
 def wav2lip(video: str, audio: str, output: str, wav2lip_dir: str, checkpoint: str) -> None:
@@ -50,52 +49,49 @@ def wav2lip(video: str, audio: str, output: str, wav2lip_dir: str, checkpoint: s
         "--face", video,
         "--audio", audio,
         "--outfile", output,
-    ])
+    ], cwd=wav2lip_dir)
 
 
 def dub_video(
     input_video: str,
-    output_video: str = "output_japanese.mp4",
+    output_video: str = "japonca_final.mp4",
     workdir: str = "work",
-    voice: str = "ja-JP-NanamiNeural",
-    wav2lip_dir: str | None = None,
-    wav2lip_checkpoint: str | None = None,
+    wav2lip_dir: str = "Wav2Lip",
+    wav2lip_checkpoint: str = "checkpoints/wav2lip_gan.pth",
 ) -> dict:
-    """Türkçe videoyu yazıya çevirir, Japoncaya çevirir, Japonca ses üretir ve videoya uygular.
-
-    Wav2Lip yolu ve checkpoint verilirse ağız hareketleri yeni Japonca sese göre senkronlanır.
-    """
+    """One-shot pipeline: Turkish video -> Japanese translation -> cloned speaker voice -> lip-synced MP4."""
     work = Path(workdir)
     work.mkdir(parents=True, exist_ok=True)
-    source_audio = str(work / "source_tr.wav")
-    japanese_audio = str(work / "japanese.mp3")
+    source_audio = str(work / "source_voice.wav")
+    japanese_audio = str(work / "japanese_cloned.wav")
 
     extract_audio(input_video, source_audio)
     turkish_text = transcribe_turkish(source_audio)
     japanese_text = translate(turkish_text, "tr-ja").text
-    japanese_voice(japanese_text, japanese_audio, voice)
-
-    if wav2lip_dir and wav2lip_checkpoint:
-        wav2lip(input_video, japanese_audio, output_video, wav2lip_dir, wav2lip_checkpoint)
-        lip_sync = True
-    else:
-        replace_audio(input_video, japanese_audio, output_video)
-        lip_sync = False
+    clone_voice_japanese(japanese_text, source_audio, japanese_audio)
+    wav2lip(input_video, japanese_audio, output_video, wav2lip_dir, wav2lip_checkpoint)
 
     return {
         "turkish_text": turkish_text,
         "japanese_text": japanese_text,
+        "japanese_audio": japanese_audio,
         "output_video": output_video,
-        "lip_sync": lip_sync,
+        "voice_cloned": True,
+        "lip_sync": True,
     }
 
 
 if __name__ == "__main__":
     import argparse
-    parser = argparse.ArgumentParser(description="Türkçe videoyu Japonca dublajla yeniden üret")
+    parser = argparse.ArgumentParser(description="Türkçe videoyu aynı konuşmacının sesiyle Japonca ve dudak senkronlu üret")
     parser.add_argument("input_video")
-    parser.add_argument("--output", default="output_japanese.mp4")
-    parser.add_argument("--wav2lip-dir")
-    parser.add_argument("--wav2lip-checkpoint")
+    parser.add_argument("--output", default="japonca_final.mp4")
+    parser.add_argument("--wav2lip-dir", default="Wav2Lip")
+    parser.add_argument("--wav2lip-checkpoint", default="checkpoints/wav2lip_gan.pth")
     args = parser.parse_args()
-    print(dub_video(args.input_video, args.output, wav2lip_dir=args.wav2lip_dir, wav2lip_checkpoint=args.wav2lip_checkpoint))
+    print(dub_video(
+        args.input_video,
+        args.output,
+        wav2lip_dir=args.wav2lip_dir,
+        wav2lip_checkpoint=args.wav2lip_checkpoint,
+    ))

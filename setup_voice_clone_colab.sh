@@ -3,16 +3,17 @@ set -e
 
 apt-get update -qq
 apt-get install -y -qq ffmpeg
-python -m pip install -U pip
+python -m pip install -U pip setuptools wheel
 
 # Core pipeline
 python -m pip install openai-whisper transformers sentencepiece
 
-# XTTS-v2 voice cloning. Pin setuptools for current Colab/PyTorch compatibility.
-python -m pip install 'setuptools<82'
-python -m pip install TTS
+# Maintained Coqui TTS package supports current Colab/Python 3.13.
+# The old PyPI package named `TTS` only supports Python <3.12.
+python -m pip uninstall -y TTS >/dev/null 2>&1 || true
+python -m pip install -U 'coqui-tts[ja]'
 
-# Accept Coqui model license non-interactively when XTTS downloads.
+# XTTS model license acceptance for non-interactive Colab runs.
 export COQUI_TOS_AGREED=1
 
 echo 'Voice cloning dependencies ready.'

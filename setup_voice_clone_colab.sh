@@ -1,31 +1,23 @@
 #!/usr/bin/env bash
-set -e
+set -euo pipefail
 
 apt-get update -qq
-apt-get install -y -qq ffmpeg
-python -m pip install -U pip setuptools wheel
+apt-get install -y -qq ffmpeg python3-venv
 
-# Coqui XTTS 0.27.5 currently breaks with Transformers 5.x because
-# isin_mps_friendly was removed. 4.57.6 works with both XTTS and our
-# direct NLLB translation code.
-python -m pip install --force-reinstall --no-deps 'transformers==4.57.6'
-python -m pip install -U sentencepiece openai-whisper
-
-# Maintained Coqui package (Python 3.13 compatible).
-python -m pip uninstall -y TTS >/dev/null 2>&1 || true
-python -m pip install -U 'coqui-tts[ja]==0.27.5'
-
-# Re-assert the compatible Transformers version in case dependency
-# resolution changed it while installing Coqui.
-python -m pip install --force-reinstall --no-deps 'transformers==4.57.6'
+# Keep the Colab/main environment untouched: NLLB/Whisper run there.
+# XTTS gets its own environment so its Transformers dependency cannot
+# break the translation stack.
+VENV="/content/xtts_env"
+python -m venv --system-site-packages "$VENV"
+"$VENV/bin/python" -m pip install -U pip setuptools wheel
+"$VENV/bin/python" -m pip uninstall -y TTS >/dev/null 2>&1 || true
+"$VENV/bin/python" -m pip install -U 'coqui-tts[ja]==0.27.5'
 
 export COQUI_TOS_AGREED=1
 
-python - <<'PY'
-import transformers
+"$VENV/bin/python" - <<'PY'
 from TTS.api import TTS
-print('Transformers:', transformers.__version__)
-print('Coqui TTS import: OK')
+print('XTTS isolated environment: OK')
 PY
 
-echo 'Voice cloning dependencies ready.'
+echo 'Voice cloning environment ready: /content/xtts_env'

@@ -1,9 +1,9 @@
 faster-whisper>=1.1.1
-transformers>=4.57.0
+transformers>=4.57.0,<5
 sentencepiece>=0.2.0
 accelerate>=1.2.0
 soundfile>=0.12.1
 librosa>=0.10.2
 qwen-tts>=0.1.0
-huggingface-hub>=0.27.0
+huggingface-hub>=0.34.0,<1.0
 numpy>=1.26,<3

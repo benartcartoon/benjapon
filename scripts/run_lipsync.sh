@@ -25,7 +25,9 @@ task_0:
  video_path: "$VIDEO"
  audio_path: "$AUDIO"
 EOF
-  (cd "$D" && "$D/.venv/bin/python" -m scripts.inference \
+  # Colab MPLBACKEND=module://matplotlib_inline... degerini alt surece aktarir.
+  # MuseTalk venv'inde inline backend yok; headless inference icin Agg'yi burada da zorla.
+  (cd "$D" && MPLBACKEND=Agg "$D/.venv/bin/python" -m scripts.inference \
     --inference_config "$CFG" \
     --result_dir "$RES" \
     --unet_model_path models/musetalkV15/unet.pth \

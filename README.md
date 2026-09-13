@@ -1,30 +1,35 @@
-# BenJapon — tek komut Japonca dublaj
+# BenJapon — Türkçe videodan tek komutla Japonca dublaj
 
-Amaç: Türkçe konuşulan bir videoyu al, konuşmayı yazıya dök, Japoncaya çevir, aynı konuşmacının sesini Qwen3-TTS ile klonla ve videoyu yeni Japonca sese göre dudak senkronla.
+Hedef: Türkçe konuştuğun videoyu alır; konuşmayı çözer, Japoncaya çevirir, Qwen3-TTS ile senin ses karakterinden Japonca konuşma üretir ve MuseTalk 1.5 ile ağız hareketlerini yeni sese uyarlar.
 
-## Tek komut
+## Google Colab: SADECE TEK HÜCRE
 
-GPU sunucusunda:
+Colab çalışma zamanını **T4 GPU** yap, videonu `/content/video.mp4` adıyla yükle ve yalnızca şu hücreyi çalıştır:
 
-```bash
-git clone https://github.com/benartcartoon/benjapon.git && cd benjapon && bash oneclick.sh /path/video.mp4
+```python
+!rm -rf /content/benjapon && git clone -q https://github.com/benartcartoon/benjapon.git /content/benjapon && cd /content/benjapon && bash oneclick.sh /content/video.mp4
 ```
 
-İlk çalıştırmada ortam ve model dosyaları indirilir. Sonraki videolarda aynı önbellek kullanılır.
+Başka kurulum hücresi yok. Paketler, Python ortamları, modeller ve lip-sync motoru GitHub'daki `oneclick.sh` tarafından hazırlanır.
 
-Çıktı: `outputs/<video_adi>_JA.mp4`
+Çıktı:
 
-## Kalite seçimi
-- 18 GB ve üzeri VRAM: LatentSync 1.6, 512px, 30 inference step.
-- 8–17 GB VRAM: MuseTalk 1.5.
-- 8 GB altı: bilinçli olarak durur; düşük kaliteli minimum kurulum yapılmaz.
+`/content/benjapon/outputs/video_JA.mp4`
 
-## Ana bileşenler
+## T4 mimarisi
+
 - ASR: faster-whisper large-v3
-- Çeviri: NLLB-200 distilled 1.3B (Türkçe -> Japonca)
+- Çeviri: NLLB-200 distilled 1.3B (`tur_Latn` -> `jpn_Jpan`)
 - Ses klonlama: Qwen/Qwen3-TTS-12Hz-1.7B-Base
-- Lip-sync: ByteDance LatentSync 1.6 veya MuseTalk 1.5
+- Lip-sync: MuseTalk 1.5
 - Video/audio: FFmpeg
+- Ana ortam: izole Python 3.12
+- MuseTalk: ayrı izole Python 3.10 + kendi CUDA/PyTorch/MMLab bağımlılıkları
 
-## Not
-En iyi ses klonu için videoda tek konuşmacı, temiz ses ve en az birkaç saniyelik net konuşma bulunması gerekir.
+Bu ayrım özellikle güncel Google Colab sistem Python'u ile MuseTalk'ın eski MMLab bağımlılıklarının çakışmasını önlemek için vardır.
+
+## Kullanım notu
+
+İlk çalıştırma model ve paketleri indireceği için uzun sürer. Aynı runtime içinde sonraki çalıştırmalar önbellekten yararlanır. Runtime tamamen silinirse Colab'ın geçici diskindeki modeller de silinir ve yeniden indirilir.
+
+En iyi ses klonu için videoda tek konuşmacı ve birkaç saniyelik temiz konuşma bulunması önerilir.

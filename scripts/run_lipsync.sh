@@ -6,12 +6,12 @@ mkdir -p "$(dirname "$OUT")"
 
 if [[ "$ENGINE" == "latentsync" ]]; then
   D="$ROOT/engines/LatentSync"
-  (cd "$D" && "$D/.venv/bin/python" -m scripts.inference \
-    --unet_config_path configs/unet/stage2_512.yaml \
+  # LatentSync 1.5: 256px stage2 config, T4 uyumlu. 30 step kalite/hiz dengesi.
+  (cd "$D" && MPLBACKEND=Agg "$D/.venv/bin/python" -m scripts.inference \
+    --unet_config_path configs/unet/stage2.yaml \
     --inference_ckpt_path checkpoints/latentsync_unet.pt \
     --inference_steps 30 \
     --guidance_scale 1.5 \
-    --enable_deepcache \
     --video_path "$VIDEO" \
     --audio_path "$AUDIO" \
     --video_out_path "$OUT")
@@ -25,8 +25,6 @@ task_0:
  video_path: "$VIDEO"
  audio_path: "$AUDIO"
 EOF
-  # Colab MPLBACKEND=module://matplotlib_inline... degerini alt surece aktarir.
-  # MuseTalk venv'inde inline backend yok; headless inference icin Agg'yi burada da zorla.
   (cd "$D" && MPLBACKEND=Agg "$D/.venv/bin/python" -m scripts.inference \
     --inference_config "$CFG" \
     --result_dir "$RES" \

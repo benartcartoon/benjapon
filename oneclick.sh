@@ -14,7 +14,7 @@ command -v nvidia-smi >/dev/null 2>&1 || { echo "HATA: NVIDIA GPU yok. Colab > C
 VRAM=$(nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits | head -1 | tr -d ' ')
 (( VRAM >= 12000 )) || { echo "HATA: En az 12 GB VRAM gerekiyor. Bulunan: ${VRAM} MB"; exit 3; }
 
-echo "=== BenJapon | GPU ${VRAM} MB ==="
+echo "=== BenJapon | GPU ${VRAM} MB | LatentSync 1.5 ==="
 apt-get update -qq
 apt-get install -y -qq ffmpeg git curl libgl1 libglib2.0-0 build-essential
 
@@ -35,14 +35,13 @@ mkdir -p engines outputs cache work
 export HF_HOME="${HF_HOME:-$ROOT/cache/huggingface}"
 export TRANSFORMERS_CACHE="$HF_HOME"
 
-bash scripts/setup_musetalk.sh
+# T4 icin MuseTalk yerine daha dogal diffusion tabanli LatentSync 1.5.
+bash scripts/setup_latentsync.sh
 
-# MuseTalk'un resmi download_weights.sh betigi aktif ana ortamdaki HF paketini
-# degistirebiliyor. Lip-sync kurulumu bittikten sonra ana ortamı kesin olarak geri sabitle.
 python -m pip install -q --upgrade --force-reinstall "huggingface-hub>=0.34.0,<1.0"
 python - <<'PY'
 import huggingface_hub, transformers
 print('Ana ortam OK | huggingface-hub:', huggingface_hub.__version__, '| transformers:', transformers.__version__)
 PY
 
-python pipeline.py --input "$INPUT" --engine musetalk
+python pipeline.py --input "$INPUT" --engine latentsync

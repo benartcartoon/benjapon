@@ -4,17 +4,17 @@ Hedef: Türkçe konuştuğun videoyu alır; konuşmayı çözer, Japoncaya çevi
 
 ## Google Colab: SADECE TEK HÜCRE
 
-Colab çalışma zamanını **T4 GPU** yap, videonu `/content/video.mp4` adıyla yükle ve yalnızca şu hücreyi çalıştır:
+Colab çalışma zamanını **T4 GPU** yap, videonu yükle ve yalnızca şu hücreyi çalıştır. Repo daha önce indirilmişse SILMEZ; yalnızca GitHub'daki yeni kodları çeker. Böylece aynı Colab oturumunda indirilen ortamlar ve modeller korunur.
 
 ```python
-!rm -rf /content/benjapon && git clone -q https://github.com/benartcartoon/benjapon.git /content/benjapon && cd /content/benjapon && bash oneclick.sh /content/video.mp4
+!if [ -d /content/benjapon/.git ]; then cd /content/benjapon && git pull --ff-only; else git clone -q https://github.com/benartcartoon/benjapon.git /content/benjapon; fi; cd /content/benjapon && bash oneclick.sh "/content/VID_20260905_191202.mp4"
 ```
 
 Başka kurulum hücresi yok. Paketler, Python ortamları, modeller ve lip-sync motoru GitHub'daki `oneclick.sh` tarafından hazırlanır.
 
 Çıktı:
 
-`/content/benjapon/outputs/video_JA.mp4`
+`/content/benjapon/outputs/VID_20260905_191202_JA.mp4`
 
 ## T4 mimarisi
 
@@ -26,10 +26,10 @@ Başka kurulum hücresi yok. Paketler, Python ortamları, modeller ve lip-sync m
 - Ana ortam: izole Python 3.12
 - MuseTalk: ayrı izole Python 3.10 + kendi CUDA/PyTorch/MMLab bağımlılıkları
 
-Bu ayrım özellikle güncel Google Colab sistem Python'u ile MuseTalk'ın eski MMLab bağımlılıklarının çakışmasını önlemek için vardır.
-
 ## Kullanım notu
 
-İlk çalıştırma model ve paketleri indireceği için uzun sürer. Aynı runtime içinde sonraki çalıştırmalar önbellekten yararlanır. Runtime tamamen silinirse Colab'ın geçici diskindeki modeller de silinir ve yeniden indirilir.
+İlk çalıştırma model ve paketleri indireceği için uzun sürer. Aynı runtime içinde sonraki çalıştırmalarda `/content/benjapon` silinmediği için indirilmiş dosyalar korunur. GitHub'da hata düzeltmesi yapıldığında aynı hücre tekrar çalıştırılır ve `git pull` yalnızca değişen kodu getirir.
+
+**Colab runtime tamamen kapatılır/silinirse** `/content` geçici diski de silinebilir; bu durumda modellerin yeniden indirilmesi gerekir.
 
 En iyi ses klonu için videoda tek konuşmacı ve birkaç saniyelik temiz konuşma bulunması önerilir.

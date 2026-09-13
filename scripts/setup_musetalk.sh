@@ -7,14 +7,20 @@ if [[ ! -d "$DIR/.git" ]]; then git clone --depth 1 https://github.com/TMElyrala
 if [[ ! -x "$DIR/.venv/bin/python" ]]; then uv python install 3.10; uv venv --seed --python 3.10 "$DIR/.venv"; fi
 P="$DIR/.venv/bin/python"
 
-# Tum gercek runtime importlarini kontrol et. mmpose tek basina import olsa bile
-# inference sirasinda xtcocotools gerekir.
-if "$P" -c 'import torch, mmcv, mmengine, mmdet, xtcocotools; from mmpose.apis import inference_topdown, init_model' >/dev/null 2>&1; then
+# Colab ana kernel'i matplotlib_inline backend'ini miras birakir; MuseTalk'in izole
+# Python 3.10 ortaminda bu backend yok. Headless inference icin Agg kullan.
+export MPLBACKEND=Agg
+
+# mmpose no-deps kuruldugu icin runtime'da gereken paketleri acikca garanti et.
+if ! "$P" -c 'import xtcocotools, json_tricks, munkres' >/dev/null 2>&1; then
+  "$P" -m pip install -q "xtcocotools>=1.13" "json-tricks>=3.17" "munkres>=1.1.4"
+fi
+
+# Mevcut agir kurulum saglamsa yeniden kurma. Sadece gercek inference importunu test et.
+if "$P" -c 'import torch, mmcv, mmengine, mmdet; from mmpose.apis import inference_topdown, init_model' >/dev/null 2>&1; then
   echo "MuseTalk paketleri hazir; tekrar kurulum atlandi."
 else
-  "$P" -m pip install -q -U pip wheel setuptools
   "$P" -m pip install -q "numpy==1.23.5"
-  # Buyuk Torch paketlerini yalniz gercekten eksikse kur.
   if ! "$P" -c 'import torch, torchvision, torchaudio' >/dev/null 2>&1; then
     "$P" -m pip install -q torch==2.0.1 torchvision==0.15.2 torchaudio==2.0.2 --index-url https://download.pytorch.org/whl/cu118
   fi
@@ -22,16 +28,13 @@ else
   "$P" -m pip install -q "openmim==0.3.9"
   if ! "$P" -c 'import mmengine' >/dev/null 2>&1; then "$DIR/.venv/bin/mim" install mmengine; fi
   if ! "$P" -c 'import mmcv' >/dev/null 2>&1; then "$DIR/.venv/bin/mim" install "mmcv==2.0.1"; fi
-  "$P" -m pip install -q "mmdet==3.1.0" "setuptools<81" "six>=1.16"
+  "$P" -m pip install -q "mmdet==3.1.0" "setuptools<81" "six>=1.16" "xtcocotools>=1.13" "json-tricks>=3.17" "munkres>=1.1.4"
   "$P" -m pip install -q --no-build-isolation "chumpy==0.70"
-  # mmpose'u no-deps kurdugumuz icin gerekli runtime bagimliligini acikca ekle.
-  "$P" -m pip install -q "xtcocotools>=1.13"
   "$P" -m pip install -q --no-deps "mmpose==1.1.0"
 fi
 
-# Son kontrol: lip-sync baslamadan once ayni import zincirini gercekten calistir.
-"$P" - <<'PY'
-import torch, xtcocotools
+MPLBACKEND=Agg "$P" - <<'PY'
+import torch, xtcocotools, json_tricks, munkres
 from mmpose.apis import inference_topdown, init_model
 print('MuseTalk runtime paketleri OK | CUDA:', torch.cuda.is_available(), '| Torch:', torch.__version__)
 if not torch.cuda.is_available(): raise SystemExit('HATA: MuseTalk CUDA GPU goremedi')

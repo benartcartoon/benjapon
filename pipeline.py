@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-import argparse, gc, os, subprocess
+import argparse, gc, os, subprocess, shutil
 from pathlib import Path
 
 import soundfile as sf
@@ -31,7 +31,7 @@ def transcribe(wav):
     text = " ".join(s.text.strip() for s in items).strip()
     if not text:
         raise RuntimeError("Konusma algilanamadi.")
-    ref = items[0].text.strip()
+    ref = text
     del model
     gc.collect(); torch.cuda.empty_cache()
     return text, ref
@@ -40,7 +40,7 @@ def transcribe(wav):
 def translate_tr_ja(text):
     model_id = "facebook/nllb-200-distilled-1.3B"
     tok = AutoTokenizer.from_pretrained(model_id, src_lang="tur_Latn")
-    model = AutoModelForSeq2SeqLM.from_pretrained(model_id, torch_dtype=torch.float16).to("cuda")
+    model = AutoModelForSeq2SeqLM.from_pretrained(model_id, dtype=torch.float16).to("cuda")
     chunks, cur = [], ""
     for sent in text.replace("?", "?.").replace("!", "!.").split("."):
         sent = sent.strip()
@@ -62,11 +62,44 @@ def make_reference(full_wav, ref_wav):
     run(["ffmpeg", "-y", "-i", full_wav, "-t", "10", "-ac", "1", "-ar", "24000", ref_wav])
 
 
+def _qwen_cache_is_broken():
+    hub = Path(os.environ.get("HF_HOME", ROOT / "cache/huggingface"))
+    model_dir = hub / "hub" / "models--Qwen--Qwen3-TTS-12Hz-1.7B-Base"
+    if not model_dir.exists():
+        model_dir = hub / "models--Qwen--Qwen3-TTS-12Hz-1.7B-Base"
+    if not model_dir.exists():
+        return False
+    snapshots = model_dir / "snapshots"
+    if not snapshots.exists():
+        return False
+    for snap in snapshots.iterdir():
+        tok = snap / "speech_tokenizer"
+        if tok.exists() and not (tok / "preprocessor_config.json").exists():
+            return True
+    return False
+
+
+def _clear_qwen_cache():
+    hub = Path(os.environ.get("HF_HOME", ROOT / "cache/huggingface"))
+    for p in [hub / "hub" / "models--Qwen--Qwen3-TTS-12Hz-1.7B-Base",
+              hub / "models--Qwen--Qwen3-TTS-12Hz-1.7B-Base"]:
+        if p.exists():
+            print("Eksik Qwen3-TTS onbellegi temizleniyor:", p, flush=True)
+            shutil.rmtree(p, ignore_errors=True)
+
+
 def tts_clone(text_ja, ref_wav, ref_text, out_wav):
-    kwargs = dict(device_map="cuda:0", dtype=torch.bfloat16)
+    # T4 Turing GPU: FP16 kullan. FlashAttention zorlamiyoruz; kurulu degilse normal PyTorch attention calisir.
+    if _qwen_cache_is_broken():
+        _clear_qwen_cache()
+    kwargs = dict(device_map="cuda:0", dtype=torch.float16)
     try:
-        model = Qwen3TTSModel.from_pretrained("Qwen/Qwen3-TTS-12Hz-1.7B-Base", attn_implementation="flash_attention_2", **kwargs)
-    except Exception:
+        model = Qwen3TTSModel.from_pretrained("Qwen/Qwen3-TTS-12Hz-1.7B-Base", **kwargs)
+    except OSError as e:
+        # Onceki yarim/bozuk model indirmesini tek sefer otomatik onar.
+        if "feature extractor" not in str(e).lower() and "preprocessor_config.json" not in str(e):
+            raise
+        _clear_qwen_cache()
         model = Qwen3TTSModel.from_pretrained("Qwen/Qwen3-TTS-12Hz-1.7B-Base", **kwargs)
     wavs, sr = model.generate_voice_clone(text=text_ja, language="Japanese", ref_audio=str(ref_wav), ref_text=ref_text, non_streaming_mode=True)
     sf.write(out_wav, wavs[0], sr)

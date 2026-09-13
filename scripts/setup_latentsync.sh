@@ -14,9 +14,20 @@ if [[ ! -x "$DIR/.venv/bin/python" ]]; then
   "$DIR/.venv/bin/python" -m pip install -r "$DIR/requirements.txt"
 fi
 
-if [[ ! -f "$DIR/checkpoints/latentsync_unet.pt" ]]; then
-  mkdir -p "$DIR/checkpoints"
-  "$DIR/.venv/bin/python" -m pip install -U huggingface-hub
-  "$DIR/.venv/bin/huggingface-cli" download ByteDance/LatentSync-1.6 whisper/tiny.pt --local-dir "$DIR/checkpoints"
-  "$DIR/.venv/bin/huggingface-cli" download ByteDance/LatentSync-1.6 latentsync_unet.pt --local-dir "$DIR/checkpoints"
+mkdir -p "$DIR/checkpoints"
+"$DIR/.venv/bin/python" -m pip install -q -U "huggingface-hub>=0.34,<1"
+HF="$DIR/.venv/bin/hf"
+
+# T4 15 GB icin LatentSync 1.5 kullan. Resmi minimum inference VRAM'i 8 GB.
+# 1.6 18 GB minimum istedigi icin T4'te kullanma.
+if [[ ! -s "$DIR/checkpoints/latentsync_unet.pt" ]]; then
+  "$HF" download ByteDance/LatentSync-1.5 latentsync_unet.pt --local-dir "$DIR/checkpoints"
 fi
+if [[ ! -s "$DIR/checkpoints/whisper/tiny.pt" ]]; then
+  "$HF" download ByteDance/LatentSync-1.5 whisper/tiny.pt --local-dir "$DIR/checkpoints"
+fi
+
+[[ -s "$DIR/checkpoints/latentsync_unet.pt" ]] || { echo "HATA: LatentSync 1.5 UNet eksik"; exit 10; }
+[[ -s "$DIR/checkpoints/whisper/tiny.pt" ]] || { echo "HATA: LatentSync Whisper eksik"; exit 11; }
+
+echo "LatentSync 1.5 hazir."

@@ -7,23 +7,36 @@ if [[ ! -d "$DIR/.git" ]]; then git clone --depth 1 https://github.com/TMElyrala
 if [[ ! -x "$DIR/.venv/bin/python" ]]; then uv python install 3.10; uv venv --seed --python 3.10 "$DIR/.venv"; fi
 P="$DIR/.venv/bin/python"
 
-if "$P" -c 'import torch, mmpose, mmcv, mmengine, mmdet' >/dev/null 2>&1; then
+# Tum gercek runtime importlarini kontrol et. mmpose tek basina import olsa bile
+# inference sirasinda xtcocotools gerekir.
+if "$P" -c 'import torch, mmcv, mmengine, mmdet, xtcocotools; from mmpose.apis import inference_topdown, init_model' >/dev/null 2>&1; then
   echo "MuseTalk paketleri hazir; tekrar kurulum atlandi."
 else
   "$P" -m pip install -q -U pip wheel setuptools
   "$P" -m pip install -q "numpy==1.23.5"
-  "$P" -m pip install -q torch==2.0.1 torchvision==0.15.2 torchaudio==2.0.2 --index-url https://download.pytorch.org/whl/cu118
+  # Buyuk Torch paketlerini yalniz gercekten eksikse kur.
+  if ! "$P" -c 'import torch, torchvision, torchaudio' >/dev/null 2>&1; then
+    "$P" -m pip install -q torch==2.0.1 torchvision==0.15.2 torchaudio==2.0.2 --index-url https://download.pytorch.org/whl/cu118
+  fi
   "$P" -m pip install -q -r "$DIR/requirements.txt"
   "$P" -m pip install -q "openmim==0.3.9"
-  "$DIR/.venv/bin/mim" install mmengine
-  "$DIR/.venv/bin/mim" install "mmcv==2.0.1"
+  if ! "$P" -c 'import mmengine' >/dev/null 2>&1; then "$DIR/.venv/bin/mim" install mmengine; fi
+  if ! "$P" -c 'import mmcv' >/dev/null 2>&1; then "$DIR/.venv/bin/mim" install "mmcv==2.0.1"; fi
   "$P" -m pip install -q "mmdet==3.1.0" "setuptools<81" "six>=1.16"
   "$P" -m pip install -q --no-build-isolation "chumpy==0.70"
+  # mmpose'u no-deps kurdugumuz icin gerekli runtime bagimliligini acikca ekle.
+  "$P" -m pip install -q "xtcocotools>=1.13"
   "$P" -m pip install -q --no-deps "mmpose==1.1.0"
 fi
 
-# MuseTalk'in eski download_weights.sh betigi Colab'da basarili gorunup V1.5 unet'i
-# birakabiliyor. Kritik HF dosyalarini guncel `hf download` ile dogrudan indir.
+# Son kontrol: lip-sync baslamadan once ayni import zincirini gercekten calistir.
+"$P" - <<'PY'
+import torch, xtcocotools
+from mmpose.apis import inference_topdown, init_model
+print('MuseTalk runtime paketleri OK | CUDA:', torch.cuda.is_available(), '| Torch:', torch.__version__)
+if not torch.cuda.is_available(): raise SystemExit('HATA: MuseTalk CUDA GPU goremedi')
+PY
+
 "$P" -m pip install -q -U "huggingface-hub[hf_xet]>=0.36,<1" "gdown==5.2.0"
 HF="$DIR/.venv/bin/hf"
 mkdir -p "$DIR/models/musetalkV15" "$DIR/models/sd-vae" "$DIR/models/whisper" "$DIR/models/dwpose" "$DIR/models/face-parse-bisent"
@@ -42,7 +55,6 @@ if [[ ! -s "$DIR/models/dwpose/dw-ll_ucoco_384.pth" ]]; then
   "$HF" download yzd-v/DWPose --local-dir "$DIR/models/dwpose" --include "dw-ll_ucoco_384.pth"
 fi
 
-# Face parser agirliklari HF disinda. Yalniz eksik olanlari indir.
 if [[ ! -s "$DIR/models/face-parse-bisent/79999_iter.pth" ]]; then
   "$DIR/.venv/bin/gdown" "https://drive.google.com/uc?id=154JgKpzCPW82qINcVieuPH3fZ2e0P812" -O "$DIR/models/face-parse-bisent/79999_iter.pth"
 fi
@@ -65,8 +77,3 @@ for f in \
 done
 
 echo "MuseTalk agirliklari OK."
-"$P" - <<'PY'
-import torch, mmpose
-print('MuseTalk ortam OK | CUDA:', torch.cuda.is_available(), '| Torch:', torch.__version__, '| mmpose:', mmpose.__version__)
-if not torch.cuda.is_available(): raise SystemExit('HATA: MuseTalk CUDA GPU goremedi')
-PY

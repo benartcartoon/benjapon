@@ -35,9 +35,19 @@ echo "=============================================="
 export HF_HOME="$CACHE_DIR/huggingface"
 export TRANSFORMERS_CACHE="$HF_HOME"
 export UV_CACHE_DIR="$CACHE_DIR/uv"
+export PIP_CACHE_DIR="$CACHE_DIR/pip"
 export TTS_HOME="$CACHE_DIR/tts"
 export MPLBACKEND=Agg
 export COQUI_TOS_AGREED=1
+mkdir -p "$HF_HOME" "$UV_CACHE_DIR" "$PIP_CACHE_DIR" "$TTS_HOME"
+
+# Bu oturumda XTTS daha once indirildiyse Drive cache'ine tasiyip tekrar indirmeyi engelle.
+LOCAL_XTTS="/root/.local/share/tts/tts_models--multilingual--multi-dataset--xtts_v2"
+DRIVE_XTTS="$TTS_HOME/tts_models--multilingual--multi-dataset--xtts_v2"
+if [[ -d "$LOCAL_XTTS" && ! -d "$DRIVE_XTTS" ]]; then
+  echo "Mevcut XTTS modeli Drive cache'ine aliniyor..."
+  cp -a "$LOCAL_XTTS" "$DRIVE_XTTS"
+fi
 
 apt-get update -qq
 apt-get install -y -qq ffmpeg git curl libgl1 libglib2.0-0 build-essential >/dev/null
@@ -120,7 +130,7 @@ tts.tts_to_file(text=text, speaker_wav=os.environ['REF_WAV'], language='ja', fil
 print('Japonca ses hazir:',os.environ['JA_WAV'])
 PY
 
-# -------- 5) Ağız senkronu --------
+# -------- 5) Agiz senkronu --------
 echo "[5/5] LatentSync video olusturuyor..."
 (cd "$LS_CODE" && MPLBACKEND=Agg "$LS_ENV/bin/python" -m scripts.inference \
   --unet_config_path configs/unet/stage2.yaml \

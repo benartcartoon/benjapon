@@ -47,18 +47,14 @@ export COQUI_TOS_AGREED=1
 export UV_CACHE_DIR="/content/uv-cache"
 mkdir -p "$HF_HOME" "$PIP_CACHE_DIR" "$TTS_HOME" "$UV_CACHE_DIR"
 
-# Temel araclar. zstd, hazir Python ortamlarini tek buyuk dosya olarak Drive'a kaydetmek/acmak icin kullanilir.
 apt-get update -qq
 apt-get install -y -qq ffmpeg git curl wget libgl1 libglib2.0-0 build-essential zstd >/dev/null
 if ! command -v uv >/dev/null 2>&1; then
   curl -LsSf https://astral.sh/uv/install.sh | sh
 fi
 export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"
-
-# Venv icindeki Python symlinklerinin hedefi her yeni Colab oturumunda yeniden gerekir.
 uv python install 3.10 3.11 >/dev/null
 
-# LatentSync kodu kucuk oldugu icin yerelde taze tutulur; agir modeller Drive'da kalir.
 rm -rf "$LS_CODE"
 git clone -q --depth 1 https://github.com/bytedance/LatentSync.git "$LS_CODE"
 
@@ -73,8 +69,6 @@ fi
 rm -rf "$LS_CODE/checkpoints"
 ln -s "$LS_DRIVE/checkpoints" "$LS_CODE/checkpoints"
 
-# -------- HIZLI ORTAM YUKLEME --------
-# Ilk calismada kurulur ve Drive'a arsivlenir. Sonraki oturumlarda yuzlerce paket yeniden kurulmaz.
 restore_env() {
   local archive="$1" envdir="$2" label="$3"
   rm -rf "$envdir"
@@ -114,8 +108,6 @@ if ! restore_env "$XTTS_ARCHIVE" "$XTTS_ENV" "XTTS/Whisper"; then
   save_env "$XTTS_ARCHIVE" "xtts_env" "XTTS/Whisper"
 fi
 
-# LatentSync tek bir karede yuz bulamayinca normalde tum videoyu durdurur.
-# Gecici yuz kaybinda son basarili landmark kullanilir.
 "$LS_ENV/bin/python" - <<'PY'
 from pathlib import Path
 p=Path('/content/LatentSync/latentsync/utils/image_processor.py')
@@ -132,18 +124,15 @@ p.write_text(s)
 print('LatentSync yuz-kaybi korumasi aktif.')
 PY
 
-# XTTS modeli zaten Drive cache'inde kalici tutulur.
 LOCAL_XTTS="/root/.local/share/tts/tts_models--multilingual--multi-dataset--xtts_v2"
 DRIVE_XTTS="$TTS_HOME/tts_models--multilingual--multi-dataset--xtts_v2"
 if [[ -d "$LOCAL_XTTS" && ! -d "$DRIVE_XTTS" ]]; then
   cp -a "$LOCAL_XTTS" "$DRIVE_XTTS"
 fi
 
-# -------- 1) Videodan Turkce ses --------
 echo "[1/5] Ses cikariliyor..."
 ffmpeg -y -i "$INPUT" -vn -ac 1 -ar 16000 "$SRC_WAV" -loglevel error
 
-# -------- 2) Turkce yazi --------
 echo "[2/5] Turkce konusma yaziliyor..."
 WHISPER_DIR="$MODEL_DIR/whisper"
 mkdir -p "$WHISPER_DIR" "$WORK/whisper_out"
@@ -155,7 +144,6 @@ TR_TEXT=$(cat "$TR_TXT")
 [[ -n "$TR_TEXT" ]] || { echo "HATA: Turkce konusma algilanamadi."; exit 10; }
 echo "TR: $TR_TEXT"
 
-# -------- 3) Japoncaya ceviri --------
 echo "[3/5] Japoncaya cevriliyor..."
 TR_INPUT="$TR_TXT" JA_OUTPUT="$JA_TXT" "$XTTS_ENV/bin/python" - <<'PY'
 import os, re
@@ -207,7 +195,6 @@ open(os.environ['JA_OUTPUT'],'w',encoding='utf-8').write(ja)
 print('JA:',ja)
 PY
 
-# -------- 4) Japonca ses klonlama --------
 echo "[4/5] Japonca ses klonlaniyor..."
 JA_INPUT="$JA_TXT" REF_WAV="$SRC_WAV" JA_WAV="$JA_WAV" "$XTTS_ENV/bin/python" - <<'PY'
 import os
@@ -219,12 +206,19 @@ tts.tts_to_file(text=text, speaker_wav=os.environ['REF_WAV'], language='ja', fil
 print('Japonca ses hazir:',os.environ['JA_WAV'])
 PY
 
-# -------- 5) Agiz senkronu --------
 echo "[5/5] LatentSync video olusturuyor..."
-(cd "$LS_CODE" && MPLBACKEND=Agg "$LS_ENV/bin/python" -m scripts.inference \
+LS_INPUT="$WORK/${STEM}_latentsync_input.mp4"
+echo "LatentSync icin RAM dostu 720p/25fps kopya hazirlaniyor..."
+ffmpeg -y -i "$INPUT" \
+  -vf "scale='min(1280,iw)':'min(720,ih)':force_original_aspect_ratio=decrease,scale=trunc(iw/2)*2:trunc(ih/2)*2,fps=25" \
+  -an -c:v libx264 -preset veryfast -crf 18 -pix_fmt yuv420p "$LS_INPUT" -loglevel error
+
+[[ -s "$LS_INPUT" ]] || { echo "HATA: LatentSync ara videosu olusmadi."; exit 19; }
+
+(cd "$LS_CODE" && PYTHONUNBUFFERED=1 MPLBACKEND=Agg "$LS_ENV/bin/python" -u -m scripts.inference \
   --unet_config_path configs/unet/stage2.yaml \
   --inference_ckpt_path checkpoints/latentsync_unet.pt \
-  --video_path "$INPUT" \
+  --video_path "$LS_INPUT" \
   --audio_path "$JA_WAV" \
   --video_out_path "$FINAL")
 

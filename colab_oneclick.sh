@@ -48,7 +48,6 @@ mkdir -p "$HF_HOME" "$PIP_CACHE_DIR" "$TTS_HOME"
 export UV_CACHE_DIR="/content/uv-cache"
 mkdir -p "$UV_CACHE_DIR"
 
-# Bu oturumda XTTS daha once indirildiyse Drive cache'ine tasiyip tekrar indirmeyi engelle.
 LOCAL_XTTS="/root/.local/share/tts/tts_models--multilingual--multi-dataset--xtts_v2"
 DRIVE_XTTS="$TTS_HOME/tts_models--multilingual--multi-dataset--xtts_v2"
 if [[ -d "$LOCAL_XTTS" && ! -d "$DRIVE_XTTS" ]]; then
@@ -67,7 +66,6 @@ fi
 rm -rf "$LS_CODE"
 git clone -q --depth 1 https://github.com/bytedance/LatentSync.git "$LS_CODE"
 
-# Ana LatentSync modelleri eksikse sadece bir kez Drive'a indir.
 if [[ ! -s "$LS_DRIVE/checkpoints/latentsync_unet.pt" ]]; then
   echo "LatentSync UNet ilk kez indiriliyor..."
   wget -q --show-progress -c "https://huggingface.co/ByteDance/LatentSync-1.5/resolve/main/latentsync_unet.pt" -O "$LS_DRIVE/checkpoints/latentsync_unet.pt"
@@ -84,6 +82,24 @@ uv python install 3.10 >/dev/null
 uv venv --seed --python 3.10 "$LS_ENV" >/dev/null
 "$LS_ENV/bin/python" -m pip install -q -r "$LS_CODE/requirements.txt"
 
+# LatentSync normalde tek bir karede yuz bulamazsa tum videoyu durduruyor.
+# Burada son basarili yuz landmarklarini gecici kaybolan karelerde yeniden kullanarak cokmeyi engelliyoruz.
+"$LS_ENV/bin/python" - <<'PY'
+from pathlib import Path
+p=Path('/content/LatentSync/latentsync/utils/image_processor.py')
+s=p.read_text()
+s=s.replace(
+"        if device == \"cpu\":\n            self.face_detector = None\n        else:\n            self.face_detector = FaceDetector(device=device)\n",
+"        if device == \"cpu\":\n            self.face_detector = None\n        else:\n            self.face_detector = FaceDetector(device=device)\n        self._last_landmarks3 = None\n"
+)
+s=s.replace(
+"        if bbox is None:\n            raise RuntimeError(\"Face not detected\")\n\n        pt_left_eye = np.mean(landmark_2d_106[[43, 48, 49, 51, 50]], axis=0)  # left eyebrow center\n        pt_right_eye = np.mean(landmark_2d_106[101:106], axis=0)  # right eyebrow center\n        pt_nose = np.mean(landmark_2d_106[[74, 77, 83, 86]], axis=0)  # nose center\n\n        landmarks3 = np.round([pt_left_eye, pt_right_eye, pt_nose])\n",
+"        if bbox is None:\n            if self._last_landmarks3 is None:\n                raise RuntimeError(\"Face not detected in first usable frame\")\n            landmarks3 = self._last_landmarks3\n        else:\n            pt_left_eye = np.mean(landmark_2d_106[[43, 48, 49, 51, 50]], axis=0)\n            pt_right_eye = np.mean(landmark_2d_106[101:106], axis=0)\n            pt_nose = np.mean(landmark_2d_106[[74, 77, 83, 86]], axis=0)\n            landmarks3 = np.round([pt_left_eye, pt_right_eye, pt_nose])\n            self._last_landmarks3 = landmarks3\n"
+)
+p.write_text(s)
+print('LatentSync yuz-kaybi korumasi aktif.')
+PY
+
 # -------- XTTS + Whisper + ceviri ortami --------
 rm -rf "$XTTS_ENV"
 uv python install 3.11 >/dev/null
@@ -92,7 +108,7 @@ uv venv --seed --python 3.11 "$XTTS_ENV" >/dev/null
 "$XTTS_ENV/bin/pip" install -q --force-reinstall "transformers==4.40.2" "tokenizers==0.19.1"
 "$XTTS_ENV/bin/pip" install -q --force-reinstall "torch==2.5.1" "torchaudio==2.5.1"
 "$XTTS_ENV/bin/pip" install -q --force-reinstall "numpy==1.26.4"
-"$XTTS_ENV/bin/pip" install -q cutlet unidic-lite openai-whisper sentencepiece
+"$XTTS_ENV/bin/pip" install -q cutlet unidic-lite openai-whisper sentencepiece deep-translator
 
 # -------- 1) Videodan Turkce ses --------
 echo "[1/5] Ses cikariliyor..."
@@ -102,7 +118,9 @@ ffmpeg -y -i "$INPUT" -vn -ac 1 -ar 16000 "$SRC_WAV" -loglevel error
 echo "[2/5] Turkce konusma yaziliyor..."
 WHISPER_DIR="$MODEL_DIR/whisper"
 mkdir -p "$WHISPER_DIR" "$WORK/whisper_out"
-"$XTTS_ENV/bin/whisper" "$SRC_WAV" --model small --model_dir "$WHISPER_DIR" --language Turkish --task transcribe --output_dir "$WORK/whisper_out" --output_format txt >/dev/null
+# Sık gecen özel isimler Whisper'in Ünye/Tarik gibi kelimeleri bozmasini azaltir.
+WHISPER_HINT="${WHISPER_HINT:-Ünye, Tarık, Berkenis Aydemir}"
+"$XTTS_ENV/bin/whisper" "$SRC_WAV" --model small --model_dir "$WHISPER_DIR" --language Turkish --task transcribe --initial_prompt "$WHISPER_HINT" --output_dir "$WORK/whisper_out" --output_format txt >/dev/null
 WHISPER_TXT="$WORK/whisper_out/$(basename "${SRC_WAV%.*}").txt"
 cp "$WHISPER_TXT" "$TR_TXT"
 TR_TEXT=$(cat "$TR_TXT")
@@ -111,16 +129,72 @@ echo "TR: $TR_TEXT"
 
 # -------- 3) Japoncaya ceviri --------
 echo "[3/5] Japoncaya cevriliyor..."
+# Önce Google Translate tabanli ceviri denenir (daha dogal). Servis ulasilamazsa NLLB yerel yedek devreye girer.
 TR_INPUT="$TR_TXT" JA_OUTPUT="$JA_TXT" "$XTTS_ENV/bin/python" - <<'PY'
-import os, torch
-from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
+import os, re
 src=open(os.environ['TR_INPUT'],encoding='utf-8').read().strip()
-model_id='facebook/nllb-200-distilled-600M'
-tok=AutoTokenizer.from_pretrained(model_id, src_lang='tur_Latn')
-model=AutoModelForSeq2SeqLM.from_pretrained(model_id, torch_dtype=torch.float16).to('cuda')
-x=tok(src, return_tensors='pt', truncation=True, max_length=512).to('cuda')
-y=model.generate(**x, forced_bos_token_id=tok.convert_tokens_to_ids('jpn_Jpan'), max_new_tokens=512, num_beams=4)
-ja=tok.batch_decode(y, skip_special_tokens=True)[0].strip()
+if not src:
+    raise SystemExit('HATA: Turkce metin bos.')
+
+# Uzun metni cumle/paragraf sinirlarindan bol.
+def chunks(text, limit=2500):
+    parts=re.split(r'(?<=[.!?])\s+|\n+', text)
+    out=[]; cur=''
+    for part in parts:
+        part=part.strip()
+        if not part: continue
+        if len(cur)+len(part)+1 > limit and cur:
+            out.append(cur); cur=part
+        else:
+            cur=(cur+' '+part).strip()
+    if cur: out.append(cur)
+    return out
+
+ja=''
+try:
+    from deep_translator import GoogleTranslator
+    tr=GoogleTranslator(source='tr', target='ja')
+    translated=[]
+    for c in chunks(src):
+        translated.append(tr.translate(c))
+    ja=' '.join(x.strip() for x in translated if x).strip()
+    if not ja:
+        raise RuntimeError('Bos ceviri')
+    print('Ceviri motoru: Google Translate')
+except Exception as e:
+    print('Google ceviri kullanilamadi, NLLB yedek motoru devrede:', e)
+    import torch
+    from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
+    model_id='facebook/nllb-200-distilled-600M'
+    tok=AutoTokenizer.from_pretrained(model_id, src_lang='tur_Latn')
+    model=AutoModelForSeq2SeqLM.from_pretrained(model_id, torch_dtype=torch.float16).to('cuda')
+    translated=[]
+    for c in chunks(src, 700):
+        x=tok(c, return_tensors='pt', truncation=True, max_length=384).to('cuda')
+        y=model.generate(
+            **x,
+            forced_bos_token_id=tok.convert_tokens_to_ids('jpn_Jpan'),
+            max_new_tokens=220,
+            num_beams=4,
+            no_repeat_ngram_size=3,
+            repetition_penalty=1.18,
+            early_stopping=True,
+        )
+        translated.append(tok.batch_decode(y, skip_special_tokens=True)[0].strip())
+    ja=' '.join(translated).strip()
+
+# Ayni kisa cumlenin arka arkaya takilip sonsuz tekrar etmesini temizle.
+sents=re.split(r'(?<=[。！？!?])\s*', ja)
+clean=[]
+for s in sents:
+    s=s.strip()
+    if not s: continue
+    if clean and s == clean[-1]:
+        continue
+    clean.append(s)
+ja=''.join(clean).strip()
+if not ja:
+    raise SystemExit('HATA: Japonca ceviri bos.')
 open(os.environ['JA_OUTPUT'],'w',encoding='utf-8').write(ja)
 print('JA:',ja)
 PY

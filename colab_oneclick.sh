@@ -15,6 +15,19 @@ XTTS_ENV="/content/xtts_env"
 MT_ARCHIVE="$ENV_CACHE/musetalk_env_v15.tar.zst"
 XTTS_ARCHIVE="$ENV_CACHE/xtts_env_v2.tar.zst"
 
+# BenJapon GPU runtime cleanup: after the one-click job finishes (success or error),
+# ask Colab to unassign the current runtime so GPU time is not left running.
+unassign_runtime() {
+  echo "[CLEANUP] Colab runtime sonlandiriliyor..."
+  "$XTTS_ENV/bin/python" - <<'PY' 2>/dev/null || true
+try:
+    from google.colab import runtime
+    runtime.unassign()
+except Exception:
+    pass
+PY
+}
+
 [[ -d /content/drive/MyDrive ]] || { echo "HATA: Google Drive bagli degil."; exit 1; }
 command -v nvidia-smi >/dev/null 2>&1 || { echo "HATA: GPU acik degil."; exit 2; }
 mkdir -p "$INPUT_DIR" "$OUTPUT_DIR" "$CACHE_DIR" "$MODEL_DIR" "$ENV_CACHE" "$WORK"
@@ -50,7 +63,6 @@ uv python install 3.10 3.11 >/dev/null
 rm -rf "$MT_CODE"
 git clone -q --depth 1 https://github.com/TMElyralab/MuseTalk.git "$MT_CODE"
 
-# Drive'da bir kez indirilmis modelleri MuseTalk'in bekledigi yerlere bagla.
 mkdir -p "$MT_CODE/models"
 for d in musetalkV15 sd-vae whisper dwpose face-parse-bisent; do
   [[ -d "$MT_DRIVE/$d" ]] || { echo "HATA: MuseTalk model klasoru eksik: $MT_DRIVE/$d"; exit 4; }
@@ -91,6 +103,9 @@ if ! restore_env "$XTTS_ARCHIVE" "$XTTS_ENV" "XTTS/Whisper"; then
   "$XTTS_ENV/bin/pip" install -q cutlet unidic-lite openai-whisper sentencepiece deep-translator
   save_env "$XTTS_ARCHIVE" "xtts_env" "XTTS/Whisper"
 fi
+
+# Runtime cleanup is registered only after the runtime-control Python environment exists.
+trap unassign_runtime EXIT
 
 echo "=============================================="
 echo "BenJapon - MuseTalk 1.5"
@@ -178,3 +193,4 @@ cp -f "$JA_TXT" "$OUTPUT_DIR/${STEM}_JA.txt"
 echo "=============================================="
 echo "HAZIR: $FINAL"
 echo "=============================================="
+echo "GPU ISLEMI TAMAMLANDI; COLAB RUNTIME KAPATILIYOR."
